@@ -1,0 +1,10 @@
+This game is in unfinished state and very buggy, if you encounter a persistent bug, try restarting your computer.
+
+You can't try to host a game twice without restarting the game.
+
+To host a game you need to open port 8108 and give your IP to anyone playing with you (this can be found in the lobby). 
+DO NOT GIVE YOUR IP TO ANYONE YOU DON'T TRUST. 
+DO NOT JOIN A GAME WITH A PERSON YOU DON'T TRUST. 
+Any damages from or to a person you host for, join or play with are your responsibility.
+
+This game works on a complete trust system. The server will believe anything a client tells it. Be wary of cheaters.
