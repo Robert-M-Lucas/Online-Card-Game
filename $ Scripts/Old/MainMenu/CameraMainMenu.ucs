@@ -1,0 +1,96 @@
+// UNUSED
+// Author: Robert Lucas
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+
+// Makes camera spin in main menu - unused
+
+public class CameraMainMenu : MonoBehaviour
+{
+    public bool Spin = true;
+
+    public float MaxSpin = 3;
+
+    private float RotateX;
+    private float RotateY;
+    private float RotateZ;
+
+    private float DeltaX;
+    private float DeltaY;
+    private float DeltaZ;
+
+    private Vector3 Rotation = Vector3.zero;
+
+    public Text SpinButtonText;
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        transform.localRotation = Quaternion.Euler(Vector3.zero);
+        Randomise();
+
+        if (PlayerPrefs.HasKey("DoCamSpin")) { 
+            Spin = PlayerPrefs.GetInt("DoCamSpin") == 0;
+            ToggleSpin();
+        }
+    }
+
+    // Toggle camera spin
+    public void ToggleSpin()
+    {
+        Spin = !Spin;
+
+        if (Spin)
+        {
+            PlayerPrefs.SetInt("DoCamSpin", 1);
+            SpinButtonText.text = "Don't Spin";
+        }
+        else
+        {
+            PlayerPrefs.SetInt("DoCamSpin", 0);
+            SpinButtonText.text = "Spin";
+        }
+    }
+
+    void Randomise()
+    {
+        DeltaX = Random.Range(0.1f, 6);
+        DeltaY = Random.Range(0.1f, 6);
+        DeltaZ = Random.Range(0.1f, 6);
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        if (!Spin) {
+            RotateX = 0;
+            RotateY = 0;
+            RotateZ = 0;
+            return; }
+
+        RotateX += DeltaX * Time.deltaTime;
+        RotateY += DeltaY * Time.deltaTime;
+        RotateZ += DeltaZ * Time.deltaTime;
+
+        if ((RotateX > MaxSpin & DeltaX > 0) | (RotateX < -MaxSpin & DeltaX < 0))
+        {
+            Randomise();
+            DeltaX *= (RotateX / Mathf.Abs(RotateX)) * -1;
+        }
+        else if ((RotateY > MaxSpin & DeltaY > 0) | (RotateY < -MaxSpin & DeltaY < 0))
+        {
+            Randomise();
+            DeltaY *= (RotateY / Mathf.Abs(RotateY)) * -1;
+        }
+        else if ((RotateZ > MaxSpin & DeltaZ > 0) | (RotateZ < -MaxSpin & DeltaZ < 0))
+        {
+            Randomise();
+            DeltaZ *= (RotateZ / Mathf.Abs(RotateZ)) * -1;
+        }
+
+        Rotation += new Vector3((RotateX * Time.deltaTime), (RotateY * Time.deltaTime), (RotateZ * Time.deltaTime));
+        transform.localRotation = Quaternion.Euler(Rotation);
+    }
+}

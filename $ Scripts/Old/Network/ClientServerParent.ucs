@@ -1,0 +1,45 @@
+// Author: Robert Lucas
+using System.Collections.Generic;
+using System.Net.Sockets;
+using UnityEngine;
+
+// Client and server extends this class
+
+public class ClientServerParent
+{
+    public bool running = true;
+
+    public List<PlayerNetworkData> Players = new List<PlayerNetworkData>();
+
+    public string[] BannedChars = new string[] { ";", ":", "-", "#", "@" };
+
+    public NetworkManager netManager;
+
+    public string Name;
+
+    public Socket Handler;
+
+    public int UID;
+
+    public int scene = -1;
+
+    // Checks if a name can be used and won't break string parsing
+    public string CheckName(string name)
+    {
+        if (name.Length < 1)
+        {
+            return netManager.DefaultName + " [" + ((int)Random.Range(1, 10000)).ToString() + "]";
+        }
+
+        foreach (string banned in BannedChars)
+        {
+            if (name.Contains(banned))
+            {
+                netManager.QuitLobby("Name can't contain '" + banned + "'");
+                return "";
+            }
+        }
+
+        return name;
+    }
+}

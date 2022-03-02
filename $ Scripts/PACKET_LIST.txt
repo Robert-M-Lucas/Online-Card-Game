@@ -1,0 +1,19 @@
+RID/UID#content<EOF>
+
+1 - InitialPacketServer
+2 - InitialPacketClient
+3 - PlayerInitPacket
+4 - SceneSwitchPacket
+5 - OtherPlayerInfoPacket
+10 - KickPacket
+20 - ResponseConfirmPacket
+
+100 - 199 SNAP
+110 - UpdatePacket
+120 - TrySnapPacket
+130 - OnSnapPacket
+140 - OnGameOverSnapPacket
+
+200 - 299 SPIT
+210 - MoveCardPacket
+220 - SpitUpdatePacket

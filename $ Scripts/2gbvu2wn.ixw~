@@ -1,0 +1,184 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class GameManagerScript : MonoBehaviour
+{
+    public List<PlayerManager> Players;
+    public GameObject ZoneSphere;
+
+    public NetworkManager networkManager;
+
+    public List<int> Positions = new List<int>();
+
+    public GameObject Player;
+
+    //public List<int> UIDs;
+
+    public GameObject PlayerPrefab;
+
+    public CanvasController canvasController;
+
+    public PlayerLook playerLook;
+    public PlayerMovement playerMove;
+
+    private bool DeadUpdateCheck = false;
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        networkManager = GameObject.FindGameObjectWithTag("NetworkManager").GetComponent<NetworkManager>();
+
+        if (networkManager.Running)
+        {
+            if (networkManager.Hosting)
+            {
+                Players[0].UID = 0;
+                Players[0].Name = networkManager.server.Name;
+            }
+            else
+            {
+                Players[0].UID = networkManager.client.UID;
+                Players[0].Name = networkManager.client.Name;
+
+
+            }
+            canvasController.AddPlayer(Players[0].UID);
+
+        }
+
+        PlayerPrefab.SetActive(false);
+        
+    }
+
+    public void ExitToMenu()
+    {
+        if (networkManager != null) { Destroy(networkManager.gameObject); }
+        SceneManager.LoadScene(0);
+    }
+
+    void CreatePlayer(int UID, string Name)
+    {
+        GameObject newPlayer = Instantiate(PlayerPrefab);
+        newPlayer.GetComponent<PlayerManager>().UID = UID;
+        newPlayer.GetComponent<PlayerManager>().Name = Name;
+        newPlayer.GetComponent<PlayerManager>().GameManager = this;
+        newPlayer.GetComponent<PlayerManager>().Track = Players[0].Track;
+        canvasController.AddPlayer(UID);
+        Players.Add(newPlayer.GetComponent<PlayerManager>());
+        newPlayer.SetActive(true);
+    }
+
+    public void Die()
+    {
+        playerLook.Greyscale = true;
+        playerMove.Die();
+        Players[0].Dead = true;
+        networkManager.Dead = true;
+    }
+
+    public void Respawn()
+    {
+        networkManager.Dead = false;
+        playerLook.Greyscale = false;
+        playerMove.Respawn();
+        Players[0].Respawn();
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.R)) { Respawn(); }
+
+        if (networkManager.Dead & !DeadUpdateCheck)
+        {
+            Die();
+        }
+        else if (!networkManager.Dead & DeadUpdateCheck)
+        {
+            Respawn();
+        }
+
+        Positions = new List<int>();
+        for (int i = 0; i < Players.Count; i++)
+        {
+            if (Players[i] == null) { continue; }
+            int cursor = 0;
+            foreach (int position in Positions)
+            {
+                if (Players[position].Lap < Players[i].Lap) { break; }
+                else if (Players[position].Lap == Players[i].Lap)
+                {
+                    if (Players[position].Sector < Players[i].Sector) { break; }
+                    else if (Players[position].Sector == Players[i].Sector)
+                    {
+                        if (Players[position].DistanceToNext >= Players[i].DistanceToNext) { break; }
+                    }
+                }
+                cursor += 1;
+            }
+            Positions.Insert(cursor, i);
+        }
+
+        ZoneSphere.transform.position = Players[Positions[0]].transform.position;
+
+        if (networkManager != null)
+        {
+            if (!networkManager.Running) { return; }
+
+            networkManager.Position = Player.transform.position;
+            networkManager.YRotation = Player.transform.rotation.eulerAngles.y;
+
+            List<PlayerNetworkData> ForeignPlayers = networkManager.GetPlayers();
+            bool[] ForeignPlayerChecked = new bool[ForeignPlayers.Count];
+            bool[] PlayerChecked = new bool[Players.Count];
+            for (int i = 0; i < ForeignPlayerChecked.Length; i++)
+            {
+                if (ForeignPlayers[i] == null) { continue; }
+
+                if (ForeignPlayers[i].UID == Players[0].UID) { continue; }
+
+                for (int j = 0; j < PlayerChecked.Length; j++)
+                {
+                    if (Players[j] == null) { continue; }
+                    if (Players[j].UID == ForeignPlayers[i].UID)
+                    {
+                        ForeignPlayerChecked[i] = true;
+                        PlayerChecked[j] = true;
+                        if (ForeignPlayers[i].Dead)
+                        {
+                            Players[j].Model.SetActive(false);
+                            Players[j].collider.isTrigger = true;
+                            continue;
+                        }
+                        Players[j].Model.SetActive(transform);
+                        Players[j].collider.isTrigger = false;
+                        Players[j].transform.position = ForeignPlayers[i].Position;
+                        Players[j].transform.rotation = Quaternion.Euler(0, ForeignPlayers[i].YRotation, 0);
+                        Players[j].Sector = ForeignPlayers[i].Sector;
+                        Players[j].Lap = ForeignPlayers[i].Lap;
+                        break;
+                    }
+                }
+                if (!ForeignPlayerChecked[i])
+                {
+                    CreatePlayer(ForeignPlayers[i].UID, ForeignPlayers[i].Name);
+                }
+
+            }
+            for (int i = 1; i < PlayerChecked.Length; i++)
+            {
+                if (!PlayerChecked[i])
+                {
+                    canvasController.RemovePlayer(Players[i].UID);
+                    Destroy(Players[i].gameObject);
+                    Players[i] = null;
+                }
+            }
+            canvasController.UpdateScoreboard(Players);
+        }
+
+        
+    }
+}

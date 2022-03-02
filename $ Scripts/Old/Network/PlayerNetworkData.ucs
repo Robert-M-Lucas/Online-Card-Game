@@ -1,0 +1,61 @@
+// Author: Robert Lucas
+using System.Collections.Generic;
+using System.Net.Sockets;
+using System.Text;
+using UnityEngine;
+
+// Stores data transmitted over the internet for each player
+
+public class PlayerNetworkData
+{
+    public string Name;
+    public int UID;
+    public Socket Handler;
+
+    public byte[] buffer;
+    public StringBuilder sb;
+
+    public Vector3 Position = Vector3.zero;
+
+    public bool RecievedFrom = false;
+    public bool New = true;
+
+    public float YRotation = 0;
+
+    public int Sector = 0;
+    public int Lap = 0;
+    public float DistToNext = 100;
+    public int Score = 0;
+    public int Wins = 0;
+
+    public bool Dead = false;
+
+    public bool LevelReady = false;
+
+    public int LastGameMessage = 0;
+
+    public int MovementState = 0;
+    public string AnimSpeed = "1";
+
+    public List<string> SendQueue = new List<string>();
+    public List<int> QueueIDs = new List<int>();
+
+    public PlayerNetworkData(string name, int uid, Socket handler = null, bool needBuffer = true)
+    {
+        Name = name;
+        UID = uid;
+        Handler = handler;
+        
+        if (needBuffer)
+        {
+            buffer = new byte[1024];
+            sb = new StringBuilder();
+        }
+    }
+
+    public void Reset()
+    {
+        buffer = new byte[1024];
+        sb = new StringBuilder();
+    }
+}

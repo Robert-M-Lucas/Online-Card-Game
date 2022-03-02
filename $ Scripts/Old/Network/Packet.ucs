@@ -1,0 +1,13 @@
+// Author: Robert Lucas
+using System.Collections;
+using System.Collections.Generic;
+
+// Unused
+
+[System.Serializable]
+public class PlayerUpdatePacket
+{
+    public int Code;
+    public string Data;
+    public PlayerNetworkData[] Players;
+}

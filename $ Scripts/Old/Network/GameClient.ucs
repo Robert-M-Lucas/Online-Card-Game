@@ -1,0 +1,510 @@
+// Author: Robert Lucas
+using System.Collections.Generic;
+using System.Net;
+using UnityEngine;
+using System.Net.Sockets;
+using System;
+using System.Threading;
+using System.Text;
+using Debug = UnityEngine.Debug;
+
+// Network client
+
+public class GameClient : ClientServerParent
+{
+    public Thread PingThread;
+    public Thread ResponseThread;
+    private string IP;
+
+    //private int RetryTimeout = 100;
+    //private int Retried = 0;
+
+    private string Agknowledge;
+    private List<int> Agknowledged = new List<int>();
+
+    public bool InGame = false;
+
+    private bool Sending = false;
+
+    public int Phase = 2;
+
+    IPHostEntry host;
+    IPAddress ipAddress;
+    IPEndPoint remoteEP;
+
+    private byte[] buffer = new byte[1024];
+    public StringBuilder sb = new StringBuilder();
+
+    public float[] Position = new float[3];
+
+    private int MsTick;
+
+    // Create client
+    public GameClient(NetworkManager net, int msTick)
+    {
+        netManager = net;
+        MsTick = msTick;
+    }
+
+    // Start client
+    public void StartClient(string ip, string name)
+    {
+        Name = CheckName(name);
+
+        if (Name == "") { return; }
+
+        // If you dont enter an ip, connect to localhost
+        IP = ip;
+        if (IP.Length == 0)
+        {
+            IP = "127.0.0.1";
+        }
+
+        if (PingThread != null)
+        {
+            PingThread.Abort();
+        }
+        PingThread = new Thread(ServerPinger);
+        PingThread.Start();
+    }
+
+    // Stop client
+    public void Stop(bool Abort = true)
+    {
+        running = false;
+        Debug.Log("Client Thread Stop");
+        netManager.Running = false;
+        if (PingThread != null & Abort)
+        {
+            PingThread.Abort();
+        }
+        if (Handler != null & Handler.Connected)
+        {
+            Handler.Shutdown(SocketShutdown.Both);
+            Handler.Close();
+        }
+
+    }
+
+    // Join server
+    private void ServerPinger()
+    {
+        Debug.Log("Client Thread Start");
+        byte[] bytes = new byte[1024];
+
+        try
+        {
+            ipAddress = IPAddress.Parse(IP);
+            remoteEP = new IPEndPoint(ipAddress, 8108);
+
+            Handler = new Socket(ipAddress.AddressFamily,
+                SocketType.Stream, ProtocolType.Tcp);
+
+            Handler.Connect(remoteEP);
+
+            Debug.Log("Socket connected to {0}" +
+                Handler.RemoteEndPoint.ToString());
+  
+            byte[] msg = Encoding.ASCII.GetBytes("0000" + Name + ";" + netManager.Version + "<EOF>");
+
+            int bytesSent = Handler.Send(msg);
+
+            int bytesRec = Handler.Receive(bytes);
+
+            string rec = Encoding.ASCII.GetString(bytes, 0, bytesRec);
+            Debug.Log("Echoed test = {0}" +
+                rec);
+
+            // Error code for version mismatch
+            if (rec.Substring(0, 4) == "9997")
+            {
+                netManager.QuitLobby("Version doesn't match host: " + rec.Substring(5, rec.Length - 5));
+                Stop(false);
+                return;
+            }
+            // Error code for host refusing connection
+            if (rec[4] != '1')
+            {
+                netManager.QuitLobby("Host server refused connection");
+                Stop(false);
+                return;
+            }
+
+            // Creates all other players on the network
+            string players_string = rec.Substring(5, rec.Length - 10); // Remove EOF
+
+            foreach (string player_data_string in players_string.Split(';'))
+            {
+                if (player_data_string.Length < 1) { break; }
+
+                Players.Add(new PlayerNetworkData(player_data_string.Split(':')[0], int.Parse(player_data_string.Split(':')[1]), null, false));
+            }
+
+            // Gets UID from server
+            UID = Players[0].UID;
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e);
+            netManager.QuitLobby(e.ToString());
+            Stop();
+        }
+
+        // Starts recieving data from server
+        Handler.BeginReceive(buffer, 0, 1024, 0, new AsyncCallback(ReadCallback), Players[0]);
+
+        // Start sending update pings to server
+        SendLoop();
+    }
+
+    // Recieve data
+    private void ReadCallback(IAsyncResult ar)
+    {
+        try
+        {
+            if (!running) { return; }
+            String content = String.Empty;
+
+            PlayerNetworkData data = (PlayerNetworkData)ar.AsyncState;
+            // Retrieve the state object and the handler socket  
+            // from the asynchronous state object.  
+
+            // Read data from the client socket.
+            int bytesRead = Handler.EndReceive(ar);
+
+            if (bytesRead > 0)
+            {
+                // There  might be more data, so store the data received so far.  
+                sb.Append(Encoding.ASCII.GetString(
+                    buffer, 0, bytesRead));
+
+                // Check for end-of-file tag. If it is not there, read
+                // more data.  
+                content = sb.ToString();
+                if (content.IndexOf("<EOF>") > -1)
+                {
+                    //Debug.Log("Recieved: " + content);
+
+                    buffer = new byte[1024];
+                    sb = new StringBuilder();
+
+                    try
+                    {
+                        StateResponse(content);
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogException(e);
+                        Debug.LogError(content);
+                    }
+
+                    Handler.BeginReceive(buffer, 0, 1024, 0, new AsyncCallback(ReadCallback), data);
+                }
+                else
+                {
+                    Handler.BeginReceive(buffer, 0, 1024, 0, new AsyncCallback(ReadCallback), data);
+                }
+            }
+            else
+            {
+                Handler.BeginReceive(buffer, 0, 1024, 0, new AsyncCallback(ReadCallback), data);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogException(e);
+            Handler.BeginReceive(buffer, 0, 1024, 0, new AsyncCallback(ReadCallback), Players[0]);
+        }
+    }
+
+    // Respond to server update
+    private void StateResponse(string all)
+    {
+        // Host kicks client
+        if (all[4] == '0')
+        {
+            Debug.Log("Stop");
+            netManager.QuitLobby("Host terminated connection");
+            Stop();
+        }
+
+        all = all.Substring(0, all.Length - 5);
+
+        Debug.Log(all);
+
+        string[] split = all.Split('#');
+
+        foreach (string content in split)
+        {
+            int phase = int.Parse(content.Substring(0, 4));
+
+            switch (phase)
+            {
+                // Player joined in lobby
+                case 3:
+                    //Debug.Log(content);
+                    bool[] stillExist = new bool[Players.Count];
+                    foreach (string player_data_string in content.Substring(5, content.Length - 5).Split(';'))
+                    {
+                        if (player_data_string.Length < 1) { continue; }
+
+                        int UID = int.Parse(player_data_string.Split(':')[1]);
+
+                        for (int i = 0; i < Players.Count; i++)
+                        {
+                            if (Players[i].UID == UID)
+                            {
+                                Players[i].Name = player_data_string.Split(':')[0];
+                                stillExist[i] = true;
+                                goto BreakContinue;
+                            }
+                        }
+
+                        Players.Add(new PlayerNetworkData(player_data_string.Split(':')[0], UID, null, false));
+                    BreakContinue:
+                        continue;
+                    }
+
+                    int leftPlayer = Array.IndexOf(stillExist, false);
+
+                    if (leftPlayer != -1)
+                    {
+                        Players.RemoveAt(leftPlayer);
+                    }
+
+
+                    break;
+
+                // Change level
+                case 11:
+                    scene = int.Parse(content.Substring(5, content.Length - 5));
+                    //Debug.Log(scene);
+                    Phase = 12;
+                    break;
+
+                // Player update
+                case 13:
+                    //Debug.Log(content);
+
+                    string _content = content.Substring(5, content.Length - 5);
+
+                    string[] PlayerStringData = _content.Split(':');
+
+                    //Debug.Log(_content);
+
+                    foreach (string DataString in PlayerStringData)
+                    {
+                        if (DataString.Length < 1) { break; }
+
+                        string[] SubData = DataString.Split(';');
+
+                        foreach (PlayerNetworkData LoopPlayer in Players)
+                        {
+                            if (LoopPlayer.UID == UID) { continue; }
+                            if (LoopPlayer.UID.ToString() == SubData[0])
+                            {
+                                if (SubData[1] == "@")
+                                {
+                                    LoopPlayer.Dead = true;
+                                    LoopPlayer.Sector = 0;
+                                    LoopPlayer.Lap = 0;
+                                    LoopPlayer.DistToNext = 100000;
+                                    continue;
+                                }
+
+                                LoopPlayer.Position = new Vector3(float.Parse(SubData[1]), float.Parse(SubData[2]), float.Parse(SubData[3]));
+                                LoopPlayer.YRotation = float.Parse(SubData[4]);
+                                LoopPlayer.Sector = int.Parse(SubData[5]);
+                                LoopPlayer.Lap = int.Parse(SubData[6]);
+                                LoopPlayer.DistToNext = float.Parse(SubData[7]);
+                                LoopPlayer.MovementState = int.Parse(SubData[8]);
+                                LoopPlayer.AnimSpeed = SubData[9];
+                                LoopPlayer.Dead = false;
+                            }
+                        }
+                    }
+
+                    break;
+                
+                // Server forces respawn
+                case 5001:
+                    if (AgknowledgeId(content))
+                    {
+                        return;
+                    }
+
+                    netManager.ResetPos = true;
+
+                    break;
+
+                // Round over
+                case 5003:
+                    if (AgknowledgeId(content))
+                    {
+                        return;
+                    }
+
+                    string[] split2 = content.Split(':');
+                    string data = split2[0].Substring(4, split2[0].Length - 4);
+
+                    string[] DataSplit = data.Split(';');
+                    netManager.Round = int.Parse(DataSplit[1]);
+                    if (netManager.Round > 1)
+                    {
+                        netManager.RoundOver = true;
+                        netManager.lastRoundWinner = DataSplit[2];
+                    }
+                    for (int i = 3; i < DataSplit.Length; i++)
+                    {
+                        string[] subsplit = DataSplit[i].Split('-');
+                        int uid = int.Parse(subsplit[0]);
+
+                        foreach (PlayerNetworkData player in Players)
+                        {
+                            if (player.UID == uid)
+                            {
+                                player.Wins = int.Parse(subsplit[1]);
+                                player.Score = int.Parse(subsplit[2]);
+
+                                if (uid == UID)
+                                {
+                                    netManager.Wins = player.Wins;
+                                    netManager.Score = player.Score;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    
+                    break;
+
+                // Shot by weapon 8001
+                case 8001:
+                    Debug.Log("Shot4");
+                    if (AgknowledgeId(content)) { return; }
+                    Debug.Log("Shot5");
+                    netManager.WeaponEffect = 8001;
+                    break;
+
+                // Change allowed phases
+                case 9999:
+                    int newPhase = int.Parse(content.Substring(5, content.Length - 5));
+                    Debug.Log("Switching phase to " + newPhase.ToString());
+                    Phase = newPhase;
+                    break;
+
+                // Kicked by server
+                case 9998:
+                    Debug.Log("Stop");
+                    netManager.QuitLobby("Host terminated connection");
+                    Stop();
+                    break;
+
+                default:
+                    Debug.Log("Invalid phase");
+                    break;
+            }
+        }
+    }
+
+    // Ackgnowledge critical message from server e.g. respawn or round over but NOT player updates that can be missed
+    private bool AgknowledgeId(string content)
+    {
+        string temp = content.Split(':')[1];
+        Agknowledge = temp;
+        int id = int.Parse(temp);
+        bool _return = false;
+        if (Agknowledged.Contains(id)) { _return = true; }
+
+        
+        Agknowledged.Add(id);
+        if (Agknowledged.Count > 10)
+        {
+            Agknowledged.RemoveAt(0);
+        }
+        return _return;
+    }
+
+    // Unused function to combine bytes
+    private byte[] CombineBytes(byte[][] ByteArrs)
+    {
+
+        for (int i = 1; i < ByteArrs.Length; i++)
+        {
+            int length = ByteArrs[i - 1].Length;
+            Array.Resize<byte>(ref ByteArrs[i], length + ByteArrs[i - 1].Length);
+            Array.Copy(ByteArrs[i - 1], 0, ByteArrs[i], length, ByteArrs[i - 1].Length);
+        }
+
+        return ByteArrs[ByteArrs.Length - 1];
+    }
+
+    // Send pings to server with player data for the server to respond to
+    private void SendLoop()
+    {
+        while (running)
+        {
+            Thread.Sleep(MsTick);
+            switch (Phase)
+            {
+                // Check if you are still in lobby
+                case 2:
+                    MsTick = 100;
+                    StateReply("0002" + UID.ToString());
+                    break;
+                // Change level
+                case 10:
+                    MsTick = 50;
+                    StateReply("0010");
+                    break;
+                // Send update on local players position and data
+                case 12:
+                    //byte[] combined = CombineBytes(new byte[][] { Encoding.ASCII.GetBytes("0012"),
+                    //    BitConverter.GetBytes(Position[0]),
+                    //    Encoding.ASCII.GetBytes(";"),
+                    //    BitConverter.GetBytes(Position[1]),
+                    //    Encoding.ASCII.GetBytes(";"),
+                    //    BitConverter.GetBytes(Position[2]),
+                    //    Encoding.ASCII.GetBytes("<EOF>") });
+                    MsTick = netManager.ClientUpdatePollTime;
+                    if (netManager.Dead)
+                    {
+                        StateReply("0012@");
+                    }
+                    else
+                    {
+                        StateReply("0012" + netManager.Position[0].ToString() + ";" + netManager.Position[1].ToString() + 
+                            ";" + netManager.Position[2].ToString() + ";" +
+                        netManager.YRotation.ToString() + ";" + netManager.Sector.ToString() + ";" +
+                        netManager.Lap.ToString() + ";" + netManager.DistToNext.ToString() + ";" + netManager.MovementState.ToString() + ";"
+                        + netManager.AnimSpeed);
+                    }
+                    
+                    break;
+            }
+
+            // Ackgnowledge critical update
+            if (Agknowledge != null)
+            {
+                StateReply("5000" + Agknowledge);
+                Agknowledge = null;
+            }
+        }
+    }
+
+    // Reply to server
+    private void StateReply(string reply)
+    {
+        Debug.Log("Replied " + reply);
+        Handler.Send(Encoding.ASCII.GetBytes(reply + "<EOF>"));
+    }
+}
+
+/*
+ * Send 0000 + Name
+ * Recieve 0001 + (0/1) + Player 1 name + ; + Player 2 name + ;
+ * 
+ * Send 0002
+ * Rec 0001 + (0/1) + Player 1 name + ; + Player 2 name + ;
+ * 
+*/

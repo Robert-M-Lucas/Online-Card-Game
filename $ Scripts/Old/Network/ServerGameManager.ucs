@@ -1,0 +1,131 @@
+// Author: Robert Lucas
+using System.Collections;
+using System.Collections.Generic;
+using System.Threading;
+using UnityEngine;
+
+// Manages the match (run by server)
+
+public class ServerGameManager
+{
+    GameServer Server;
+
+    int CommandIdTicker = 0;
+
+    int Round = 0;
+
+    int RoundCooldown = 5000;
+    float timer = 0;
+
+    public ServerGameManager(GameServer server)
+    {
+        Server = server;
+    }
+
+    // Send a critical command that requires ackgnowledgment to the player with a uid
+    public void SendToPlayer(PlayerNetworkData player, string command)
+    {
+        player.SendQueue.Add(command);
+        player.QueueIDs.Add(CommandIdTicker);
+        CommandIdTicker += 1;
+    }
+
+    // Sends information for if a player has been shot
+    public void WeaponData(int UID, string data)
+    {
+        foreach (PlayerNetworkData player in Server.Players)
+        {
+            if (player.UID == UID)
+            {
+                SendToPlayer(player, data);
+                return;
+            }
+        }
+    }
+
+    // Update players on the current wins and scores
+    void UpdatePlayers()
+    {
+        string sendString = "5003" + ";" + Round.ToString() + ";" + Server.netManager.lastRoundWinner;
+        for (int i = 0; i < Server.Players.Count; i++)
+        {
+            sendString += ";" + Server.Players[i].UID.ToString() + "-" + Server.Players[i].Wins.ToString() + "-" + Server.Players[i].Score.ToString();
+        }
+        for (int i = 0; i < Server.Players.Count; i++)
+        {
+            SendToPlayer(Server.Players[i], sendString);
+        }
+    }
+
+    // Force repawn all clients after a round
+    void RestartAll()
+    {
+        Server.netManager.ResetPos = true;
+        for (int i = 1; i < Server.Players.Count; i++)
+        {
+            Server.Players[i].Dead = false;
+            SendToPlayer(Server.Players[i], "5001");
+        }
+    }
+
+    public void MainLoop ()
+    {
+        while (Server.running)
+        {
+            Thread.Sleep(Server.netManager.ServerGameLoopTime);
+
+            // On round 0, wait until everyone is ready and then respawn them
+            if (Round == 0)
+            {
+                if (Server.Ready) { RestartAll(); Round += 1; Server.netManager.Round = Round; UpdatePlayers(); }
+                Thread.Sleep(Server.netManager.RoundCooldown);
+                continue;
+            }
+            
+
+            // Check if only one player is alive
+            int alive = 0;
+            int last = 1;
+            for (int i = 0; i < Server.Players.Count; i++)
+            {
+                if (Server.Players[i] != null)
+                {
+                    if (!Server.Players[i].Dead)
+                    {
+                        alive += 1;
+                        last = i;
+                    }
+                }
+            }
+
+            // Give last alive points
+            if (alive == 1 & Server.Players.Count > 1)
+            {
+                Debug.Log("Round over");
+                Round += 1;
+
+                Server.Players[last].Wins += 1;
+                Server.Players[last].Score += 100;
+
+                if (last == 0)
+                {
+                    Server.netManager.Wins = Server.Players[last].Wins;
+                    Server.netManager.Score = Server.Players[last].Score;
+                }
+
+                Server.netManager.RoundOver = true;
+                Server.netManager.lastRoundWinner = Server.Players[last].Name;
+
+                // Update players on scores and wins
+                UpdatePlayers();
+                Thread.Sleep(Server.netManager.ShowWinTime);
+                // Force respawn
+                RestartAll();
+
+                Thread.Sleep(Server.netManager.RoundCooldown);
+            }
+
+            
+        }
+    }
+}

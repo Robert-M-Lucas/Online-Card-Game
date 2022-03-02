@@ -1,0 +1,211 @@
+// Author: Robert Lucas
+using System.Collections.Generic;
+using System.Net;
+using System.IO;
+using UnityEngine;
+using System;
+using Debug = UnityEngine.Debug;
+
+/*public class StateObject
+{
+    public Socket workSocket = null;
+    public const int BufferSize = 1024;
+    public byte[] buffer = new byte[BufferSize];
+    public StringBuilder sb = new StringBuilder();
+}*/
+
+// Manages all network activity
+
+public class NetworkManager : MonoBehaviour
+{
+    [SerializeField]
+    public string Version;
+    public string DefaultName = "No Name";
+
+    [Space(10)]
+
+    public string IP;
+    public int TickRate;
+    int InverseMsRate;
+    public bool Running = false;
+    public bool Hosting = false;
+    public GameServer server;
+    public GameClient client;
+    public ClientServerParent CurrentCliServ;
+    private MainMenuManager menuManager;
+
+    public int ServerTimeoutMs;
+
+    public int TargetFramerate = 150;
+
+    public Vector3 Position;
+    public float YRotation;
+    public int Sector;
+    public int Lap;
+    public bool Dead;
+    public float DistToNext;
+    public int Score = 0;
+    public int Wins;
+    public int Round = 0;
+
+    public int MovementState;
+    public string AnimSpeed;
+
+    public bool ResetPos;
+
+    public bool RoundOver = false;
+    public string lastRoundWinner = "";
+
+    public bool Ready;
+
+    [Header("Server Tick")]
+    public int ServerKickTime = 30000;
+    public int ServerStringCreateTime = 30;
+    public int ServerGameLoopTime = 30;
+
+    [Header("Server Game Tick")]
+    public int RoundCooldown = 4000;
+    public int ShowWinTime = 3000;
+
+    [Header("Client Tick")]
+    public int ClientUpdatePollTime = 50;
+
+    public int WeaponEffect;
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        InverseMsRate = (int)(((float) 1 / (float)TickRate) * 1000);
+        DontDestroyOnLoad(gameObject);
+        
+
+        menuManager = FindObjectOfType<MainMenuManager>();
+
+        Application.targetFrameRate = 150;
+
+        //IP = GetIPAddress();
+    }
+
+    // Gets public IP
+    static string GetIPAddress()
+    {
+        string address = "";
+        WebRequest request = WebRequest.Create("http://checkip.dyndns.org/");
+        using (WebResponse response = request.GetResponse())
+        using (StreamReader stream = new StreamReader(response.GetResponseStream()))
+        {
+            address = stream.ReadToEnd();
+        }
+
+        int first = address.IndexOf("Address: ") + 9;
+        int last = address.LastIndexOf("</body>");
+        address = address.Substring(first, last - first);
+
+        return address;
+    }
+
+    // Returns a list of players if a client or server is running
+    public List<PlayerNetworkData> GetPlayers()
+    {
+        if (!Running)
+        {
+            return null;
+        }
+        return CurrentCliServ.Players;
+    }
+
+    // Joins a game - starts a client
+    public string JoinGame(string ip, string name)
+    {
+        IP = ip;
+        client = new GameClient(this, InverseMsRate);
+        CurrentCliServ = client;
+        client.StartClient(ip, name);
+
+        Hosting = false;
+        Running = true;
+        
+        return null;
+    }
+
+    // Hosts a game - starts a server
+    public string HostGame(string name, bool local)
+    {
+        if (!local)
+        {
+            try { IP = GetIPAddress(); }
+            catch (Exception e) { Debug.Log("Error getting IP: " + e.ToString()); }
+        }
+
+        server = new GameServer(this, local);
+        server.StartServer(name);
+        CurrentCliServ = server;
+        Hosting = true;
+        Running = true;
+        return null;
+    }
+
+    // Stops the client or server - whichever is running
+    public void StopClientServer()
+    {
+        if (Running)
+        {
+            if (Hosting)
+            {
+                server.Stop();
+            }
+            else
+            {
+                client.Stop();
+            }
+        }
+    }
+
+    // Quits lobby with reason displayed on screen
+    public void QuitLobby(string reason)
+    {
+        //if (SceneManager.GetActiveScene().buildIndex != 0)
+        //{
+        //    SceneManager.LoadScene(0);
+        //}
+
+        menuManager.QuitToLobby = true;
+        menuManager.Reason = reason;
+    }
+
+    // Stops server / client when you close the game
+    private void OnApplicationQuit()
+    {
+        Debug.Log("Quitting");
+        try
+        {
+            server.Stop();
+        }
+        catch (Exception e){
+            Debug.Log("Suppressed thread abort error");
+            Debug.Log(e);
+        }
+        try
+        {
+            client.Stop();
+        }
+        catch (Exception e)
+        {
+            Debug.Log("Suppressed thread abort error");
+            Debug.Log(e);
+        }
+    }
+
+    // Sends information that a player has been shot to be transmitted to other clients
+    public void WeaponData(int _UID, string data)
+    {
+        if (Hosting)
+        {
+            server.GameManager.WeaponData(_UID, data);
+        }
+        else
+        {
+            // TODO: Client shooting
+        }
+    }
+}
